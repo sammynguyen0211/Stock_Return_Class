@@ -126,10 +126,10 @@ def convert_input_pca_regression(request_body, request_content_type):
 
         return_period = 5
 
-        SP500_1 = 'AFL_CR_Cum'
-        AFL_CR_Cum = json.loads(request_body)[SP500_1]
-        SP500_2 = 'GL_CR_Cum'
-        GL_CR_Cum = json.loads(request_body)[SP500_2]
+        SP500_1 = 'ABBV_CR_Cum'
+        ABBV_CR_Cum = json.loads(request_body)[SP500_1]
+        SP500_2 = 'AOS_CR_Cum'
+        AOS_CR_Cum = json.loads(request_body)[SP500_2]
 
         X = np.log(dataset.drop([target],axis=1)).diff(return_period)
         X = np.exp(X).cumsum()
@@ -137,15 +137,15 @@ def convert_input_pca_regression(request_body, request_content_type):
         
         # Calculate the distance
         distances = np.sqrt(
-            (X[SP500_1] - AFL_CR_Cum)**2 + 
-            (X[SP500_2] - GL_CR_Cum)**2
+            (X[SP500_1] - ABBV_CR_Cum)**2 + 
+            (X[SP500_2] - AOS_CR_Cum)**2
         )
         
         closest_index = distances.idxmin()
         closest_row = X.loc[[closest_index]]
     
-        closest_row[SP500_1] = AFL_CR_Cum
-        closest_row[SP500_2] = GL_CR_Cum
+        closest_row[SP500_1] = ABBV_CR_Cum
+        closest_row[SP500_2] = AOS_CR_Cum
     
         return closest_row
     
