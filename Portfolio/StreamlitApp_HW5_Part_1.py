@@ -58,7 +58,7 @@ MODEL_INFO = {
         "explainer": 'explainer_pca.shap', 
         "pipeline": 'finalized_pca_model.tar.gz', 
         "keys": ["AFL_CR_Cum","GL_CR_Cum"], 
-        "inputs": [{"name": k, "type": "number", "min": -100.0, "max": 100.0, "default": 0.0, "step": 10.0} for k in ["AFL_CR_Cum","GL_CR_Cum"]] 
+        "inputs": [{"name": k, "type": "number", "min": -100.0, "max": 100.0, "default": 0.0, "step": 10.0} for k in ["ABBV_CR_Cum","AOS_CR_Cum"]] 
 }
 
 def load_pipeline(_session, bucket, key):
