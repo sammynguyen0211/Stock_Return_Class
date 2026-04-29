@@ -76,20 +76,27 @@ MODEL_INFO = {
 }
 
 
-def load_pipeline(_session, bucket, key):
+   def load_pipeline(_session, bucket, key):
     s3_client = _session.client('s3')
-    filename=MODEL_INFO["pipeline"]
+    filename = MODEL_INFO["pipeline"]
 
     s3_client.download_file(
         Filename=filename,
         Bucket=bucket,
-        Key= f"{key}/{os.path.basename(filename)}")
-        # Extract the .joblib file from the .tar.gz
+        Key=f"{key}/{os.path.basename(filename)}"
+    )
+
     with tarfile.open(filename, "r:gz") as tar:
         tar.extractall(path=".")
-        joblib_file = [f for f in tar.getnames() if f.endswith('.joblib')][0]
-        #joblib_file = [f for f in tar.getnames() if f.endswith('.pkl')][0]
-   
+        model_files = [f for f in tar.getnames() if f.endswith(('.joblib', '.pkl'))]
+
+        if len(model_files) == 0:
+            st.error(f"No .joblib or .pkl file found inside tar. Files found: {tar.getnames()}")
+            st.stop()
+
+        model_file = model_files[0]
+
+    return joblib.load(model_file)
 
     # Load the full pipeline
     return joblib.load(f"{joblib_file}")
