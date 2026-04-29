@@ -4,8 +4,7 @@ import statsmodels.api as sm
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.preprocessing import PowerTransformer
 from scipy.stats import skew
-from gensim.models import Word2Vec
-import spacy
+
 
 class AutoPowerTransformer(BaseEstimator, TransformerMixin):
     def __init__(self, threshold=0.75):
@@ -215,64 +214,3 @@ class PairFeatureEngineer(BaseEstimator, TransformerMixin):
         rolling_std = spread_series.rolling(self.window).std()
         return (spread_series - rolling_mean) / rolling_std
 
-class Word2VecTransformer(BaseEstimator, TransformerMixin):
-    def __init__(self, vector_size=100, window=5, min_count=1):
-        self.vector_size = vector_size
-        self.window = window
-        self.min_count = min_count
-        self.model = None
-
-    def fit(self, X, y=None):
-        # create the word2vec model
-        sentences = [str(row[0]).split() for row in X]
-        self.model = Word2Vec(sentences, vector_size=self.vector_size, 
-                              window=self.window, min_count=self.min_count)
-        return self
-
-    def transform(self, X):
-        # Convert each headline into the average of its word vectors
-        def get_mean_vector(text):
-            words = str(text).split()
-            # Filter words that actually exist in the Word2Vec vocabulary
-            vectors = [self.model.wv[w] for w in words if w in self.model.wv]
-            if not vectors:
-                return np.zeros(self.vector_size)
-            return np.mean(vectors, axis=0)
-
-        return np.array([get_mean_vector(row[0]) for row in X])
-
-class SpacyVectorTransformer(BaseEstimator, TransformerMixin):
-    def __init__(self, model_name='en_core_web_sm'):
-        self.model_name = model_name
-        self.nlp = None
-
-    def fit(self, X, y=None):
-        # Load the model only once to save time
-        if self.nlp is None:
-            try:
-                self.nlp = spacy.load(self.model_name)
-            except OSError:
-                # If the model isn't installed, this reminds them to download it
-                import os
-                os.system(f"python -m spacy download {self.model_name}")
-                self.nlp = spacy.load(self.model_name)
-        return self
-
-    def transform(self, X):
-        # Convert each text to a spaCy document and extract the built-in vector
-        # .vector returns the average of all word vectors in the document (the centroid)
-        return np.array([self.nlp(str(text)).vector for text in X])
-
-class InfToNaNTransformer(BaseEstimator, TransformerMixin):
-    def fit(self, X, y=None):
-        return self
-    
-    def transform(self, X):
-        # Replace positive and negative infinity with NaN
-        X_clean = np.array(X).copy()
-        X_clean[np.isinf(X_clean)] = np.nan
-        return X_clean
-
-# --- Usage Example ---
-# extractor = PairFeatureExtractor(window=60)
-# features_df = extractor.transform(data['AAPL'], data['MSFT'])
