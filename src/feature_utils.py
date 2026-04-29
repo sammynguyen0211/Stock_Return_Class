@@ -1,4 +1,3 @@
-
 import numpy as np
 import pandas as pd
 import datetime
@@ -99,31 +98,3 @@ def get_emp_num(col):
 def get_term_num(col):
     return pd.to_numeric(col.iloc[:, 0].str.replace(' months', '', regex=False), errors='coerce').to_frame()
 
-def run_strategy(data_df_ticker):
-    initial_capital = 100000  # Initial capital for trading
-    capital = initial_capital
-    position = 0  # No initial position
-    portfolio_value_current = 0
-    
-    # Track portfolio value over time
-    portfolio_value = []
-    
-    for i in range(1, len(data_df_ticker)):
-        # Buy
-        if data_df_ticker['Buy_Signal'][i] and capital > 0:
-            position = capital / data_df_ticker['Close'][i]
-            capital = 0  # No remaining capital
-    
-        # Sell
-        elif data_df_ticker['Sell_Signal'][i] and position > 0:
-            capital = position * data_df_ticker['Close'][i]
-            position = 0
-    
-        # Track portfolio value
-        if position == 0:
-            portfolio_value_current = capital
-        elif position > 0:
-            portfolio_value_current =  position * data_df_ticker['Close'][i]
-            
-        portfolio_value.append(portfolio_value_current)
-    return portfolio_value
