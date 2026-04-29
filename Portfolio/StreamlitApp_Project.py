@@ -144,12 +144,12 @@ def display_explanation(input_df, session, aws_bucket):
     except:
         feature_names = [f"feature_{i}" for i in range(input_df_transformed.shape[1])]
 
-input_df_transformed = pd.DataFrame(
-    input_df_transformed,
-    columns=feature_names
-)
-
-shap_values = explainer(input_df_transformed)
+    input_df_transformed = pd.DataFrame(
+        input_df_transformed,
+        columns=feature_names
+    )
+    
+    shap_values = explainer(input_df_transformed)
    
     st.subheader("🔍 Decision Transparency (SHAP)")
     fig, ax = plt.subplots(figsize=(10, 4))
