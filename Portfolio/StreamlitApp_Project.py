@@ -1,196 +1,267 @@
-import os, sys, warnings
-import numpy as np
-import pandas as pd
-import streamlit as st
-import matplotlib.pyplot as plt
-import posixpath
-
-import joblib
+import os
+import sys
+import warnings
 import tarfile
 import tempfile
+import posixpath
 
 import boto3
+import joblib
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 import sagemaker
-from sagemaker.predictor import Predictor
-from sagemaker.serializers import CSVSerializer
-from sagemaker.serializers import JSONSerializer
-from sagemaker.deserializers import JSONDeserializer
-from sagemaker.serializers import NumpySerializer
-from sagemaker.deserializers import NumpyDeserializer
-
-
-from sklearn.pipeline import Pipeline
 import shap
+import streamlit as st
+from sagemaker.deserializers import NumpyDeserializer
+from sagemaker.predictor import Predictor
+from sagemaker.serializers import JSONSerializer
 
-from joblib import dump
-from joblib import load
-
-
-
-# Setup & Path Configuration
 warnings.simplefilter("ignore")
 
-# Fix path for Streamlit Cloud (ensure 'src' is findable)
+# ------------------------------------------------------------
+# Page setup
+# ------------------------------------------------------------
+st.set_page_config(page_title="ML Deployment", layout="wide")
+st.title("👨‍💻 ML Deployment")
+
+# ------------------------------------------------------------
+# Path setup
+# ------------------------------------------------------------
 current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.abspath(os.path.join(current_dir, '..'))
+project_root = os.path.abspath(os.path.join(current_dir, ".."))
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-#from src.feature_utils import extract_features
-#from src.Custom_Classes import DropHighMissingCols, TransactionFeatureEngineer, DropHighCorrelation
+file_path = os.path.join(project_root, "Portfolio", "X_train.csv")
 
-file_path = os.path.join(project_root, 'Portfolio/X_train.csv')
+@st.cache_data
+def load_dataset(path):
+    df = pd.read_csv(path)
+    df = df.drop(columns=["Unnamed: 0"], errors="ignore")
+    df = df.loc[:, ~df.columns.str.contains("^Unnamed")]
+    return df
 
-dataset = pd.read_csv(file_path)
-dataset = dataset.drop(columns=['Unnamed: 0'], errors='ignore')
-#dataset = dataset.loc[:, ~dataset.columns.str.contains('^Unnamed')]
+try:
+    dataset = load_dataset(file_path)
+except Exception as e:
+    st.error(f"Could not load X_train.csv from {file_path}. Error: {e}")
+    st.stop()
 
-# Access the secrets
-aws_id = st.secrets["aws_credentials"]["AWS_ACCESS_KEY_ID"]
-aws_secret = st.secrets["aws_credentials"]["AWS_SECRET_ACCESS_KEY"]
-aws_token = st.secrets["aws_credentials"]["AWS_SESSION_TOKEN"]
-aws_bucket = st.secrets["aws_credentials"]["AWS_BUCKET"]
-aws_endpoint = st.secrets["aws_credentials"]["AWS_ENDPOINT"]
+# ------------------------------------------------------------
+# AWS secrets
+# ------------------------------------------------------------
+try:
+    aws_id = st.secrets["aws_credentials"]["AWS_ACCESS_KEY_ID"]
+    aws_secret = st.secrets["aws_credentials"]["AWS_SECRET_ACCESS_KEY"]
+    aws_token = st.secrets["aws_credentials"].get("AWS_SESSION_TOKEN", None)
+    aws_bucket = st.secrets["aws_credentials"]["AWS_BUCKET"]
+    aws_endpoint = st.secrets["aws_credentials"]["AWS_ENDPOINT"]
+except Exception as e:
+    st.error(f"Missing AWS secrets. Check Streamlit secrets. Error: {e}")
+    st.stop()
 
-# AWS Session Management
-@st.cache_resource # Use this to avoid downloading the file every time the page refreshes
+# ------------------------------------------------------------
+# AWS session
+# ------------------------------------------------------------
+@st.cache_resource
 def get_session(aws_id, aws_secret, aws_token):
-    return boto3.Session(
-        aws_access_key_id=aws_id,
-        aws_secret_access_key=aws_secret,
-        aws_session_token=aws_token,
-        region_name='us-east-1'
-    )
+    session_kwargs = {
+        "aws_access_key_id": aws_id,
+        "aws_secret_access_key": aws_secret,
+        "region_name": "us-east-1",
+    }
+    if aws_token:
+        session_kwargs["aws_session_token"] = aws_token
+    return boto3.Session(**session_kwargs)
 
 session = get_session(aws_id, aws_secret, aws_token)
 sm_session = sagemaker.Session(boto_session=session)
 
-# Data & Model Configuration
-
+# ------------------------------------------------------------
+# Model configuration
+# ------------------------------------------------------------
 MODEL_INFO = {
-    "endpoint"  : aws_endpoint,
+    "endpoint": aws_endpoint,
     "explainer": "shap_explainer.pkl",
-    "pipeline":  "fraud_model.tar.gz",
-    "keys"      : ['C5','C2','C1','C6'],
-    "inputs"    : [{"name": k, "type": "number", "min": -1.0, "max": 1.0, "default": 0.0, "step": 0.01} for k in ['C5','C2','C1','C6']]
+    "pipeline": "fraud_model.tar.gz",
+    "s3_model_folder": "sklearn-pipeline-deployment",
+    "inputs": [
+        {"name": k, "type": "number", "min": -1.0, "max": 1.0, "default": 0.0, "step": 0.01}
+        for k in ["C5", "C2", "C1", "C6"]
+    ],
 }
 
+# ------------------------------------------------------------
+# Helper functions
+# ------------------------------------------------------------
+@st.cache_resource
+def load_pipeline(_session, bucket, folder_key):
+    s3_client = _session.client("s3")
+    local_tar = os.path.join(tempfile.gettempdir(), MODEL_INFO["pipeline"])
+    s3_key = posixpath.join(folder_key, os.path.basename(MODEL_INFO["pipeline"]))
 
-   def load_pipeline(_session, bucket, key):
-    s3_client = _session.client('s3')
-    filename = MODEL_INFO["pipeline"]
+    try:
+        s3_client.download_file(Bucket=bucket, Key=s3_key, Filename=local_tar)
+    except Exception as e:
+        st.error(f"Could not download model from s3://{bucket}/{s3_key}. Error: {e}")
+        st.stop()
 
-    s3_client.download_file(
-        Filename=filename,
-        Bucket=bucket,
-        Key=f"{key}/{os.path.basename(filename)}"
-    )
+    extract_dir = os.path.join(tempfile.gettempdir(), "streamlit_model_extract")
+    os.makedirs(extract_dir, exist_ok=True)
 
-    with tarfile.open(filename, "r:gz") as tar:
-        tar.extractall(path=".")
-        model_files = [f for f in tar.getnames() if f.endswith(('.joblib', '.pkl'))]
+    try:
+        with tarfile.open(local_tar, "r:gz") as tar:
+            names = tar.getnames()
+            tar.extractall(path=extract_dir)
+    except Exception as e:
+        st.error(f"Could not open or extract {MODEL_INFO['pipeline']}. Error: {e}")
+        st.stop()
 
-        if len(model_files) == 0:
-            st.error(f"No .joblib or .pkl file found inside tar. Files found: {tar.getnames()}")
-            st.stop()
+    model_files = [name for name in names if name.endswith((".joblib", ".pkl"))]
 
-        model_file = model_files[0]
+    if not model_files:
+        st.error(f"No .joblib or .pkl file found inside the tar file. Files found: {names}")
+        st.stop()
 
-    return joblib.load(model_file)
+    model_path = os.path.join(extract_dir, model_files[0])
 
-    # Load the full pipeline
-    return joblib.load(f"{joblib_file}")
+    try:
+        return joblib.load(model_path)
+    except Exception as e:
+        st.error(f"Could not load model file {model_files[0]}. Error: {e}")
+        st.stop()
 
-def load_shap_explainer(_session, bucket, key, local_path):
-    s3_client = _session.client('s3')
-    local_path = local_path
+@st.cache_resource
+def load_shap_explainer(_session, bucket, key):
+    s3_client = _session.client("s3")
+    local_path = os.path.join(tempfile.gettempdir(), os.path.basename(key))
 
-    # Only download if it doesn't exist locally to save time
-    if not os.path.exists(local_path):
-        s3_client.download_file(Filename=local_path, Bucket=bucket, Key=key)
-       
-    with open(local_path, "rb") as f:
-        return load(f)
-        #return shap.Explainer.load(f)
+    try:
+        if not os.path.exists(local_path):
+            s3_client.download_file(Bucket=bucket, Key=key, Filename=local_path)
+    except Exception as e:
+        st.warning(f"Could not download SHAP explainer. SHAP chart will be skipped. Error: {e}")
+        return None
 
-# Prediction Logic
+    try:
+        return joblib.load(local_path)
+    except Exception as e:
+        st.warning(f"Could not load SHAP explainer. SHAP chart will be skipped. Error: {e}")
+        return None
+
+
+def build_input_dataframe(base_df, user_inputs):
+    row = base_df.iloc[[0]].copy()
+
+    for key, value in user_inputs.items():
+        if key in row.columns:
+            row.loc[row.index[0], key] = value
+        else:
+            row[key] = value
+
+    return row
+
+
 def call_model_api(input_df):
-
     predictor = Predictor(
         endpoint_name=MODEL_INFO["endpoint"],
         sagemaker_session=sm_session,
         serializer=JSONSerializer(),
-        deserializer=NumpyDeserializer()
+        deserializer=NumpyDeserializer(),
     )
 
     try:
-        raw_pred = predictor.predict(input_df)
-        pred_val = pd.DataFrame(raw_pred).values[-1][0]
-        #mapping = {0: "SELL", 1: "HOLD", 2: "BUY"}
+        raw_pred = predictor.predict(input_df.to_dict(orient="records"))
+        pred_val = int(np.array(raw_pred).ravel()[-1])
         mapping = {0: "Legitimate", 1: "Fraud"}
-        return mapping.get(pred_val), 200
+        return mapping.get(pred_val, str(pred_val)), 200
     except Exception as e:
-        return f"Error: {str(e)}", 500
+        return f"Prediction error: {e}", 500
 
-# Local Explainability
-def display_explanation(input_df, session, aws_bucket):
-    explainer_name = MODEL_INFO["explainer"]
-    explainer = load_shap_explainer(session, aws_bucket, posixpath.join('explainer', explainer_name),os.path.join(tempfile.gettempdir(), explainer_name))
-   
-    best_pipeline = load_pipeline(session, aws_bucket, 'sklearn-pipeline-deployment')
 
-    preprocessor = best_pipeline.named_steps['preprocess']
-    model = best_pipeline.named_steps['model']
+def get_preprocessor_and_model(best_pipeline):
+    if hasattr(best_pipeline, "named_steps"):
+        preprocessor = best_pipeline.named_steps.get("preprocess", None)
+        model = best_pipeline.named_steps.get("model", None)
+        return preprocessor, model
+    return None, best_pipeline
 
-    input_df = pd.DataFrame(input_df)
 
-    input_df_transformed = preprocessor.transform(input_df)
+def display_explanation(input_df):
+    explainer_key = posixpath.join("explainer", MODEL_INFO["explainer"])
+    explainer = load_shap_explainer(session, aws_bucket, explainer_key)
+
+    if explainer is None:
+        st.info("Prediction worked, but SHAP explanation was skipped because the explainer could not be loaded.")
+        return
+
+    best_pipeline = load_pipeline(session, aws_bucket, MODEL_INFO["s3_model_folder"])
+    preprocessor, _ = get_preprocessor_and_model(best_pipeline)
 
     try:
-        feature_names = preprocessor.get_feature_names_out()
-    except:
-        feature_names = [f"feature_{i}" for i in range(input_df_transformed.shape[1])]
+        if preprocessor is not None:
+            transformed = preprocessor.transform(input_df)
+            try:
+                feature_names = preprocessor.get_feature_names_out()
+            except Exception:
+                feature_names = [f"feature_{i}" for i in range(transformed.shape[1])]
+            explain_df = pd.DataFrame(transformed, columns=feature_names)
+        else:
+            explain_df = input_df.copy()
 
-    input_df_transformed = pd.DataFrame(
-        input_df_transformed,
-        columns=feature_names
-    )
-    
-    shap_values = explainer(input_df_transformed)
-   
+        shap_values = explainer(explain_df)
+    except Exception as e:
+        st.info(f"Prediction worked, but SHAP explanation could not be created. Error: {e}")
+        return
+
     st.subheader("🔍 Decision Transparency (SHAP)")
-    fig, ax = plt.subplots(figsize=(10, 4))
-    shap.plots.waterfall(shap_values[0, :, 1])  # class 1 = fraud
-    st.pyplot(fig)
-    top_feature = pd.Series(shap_values[0, :, 1].values, index=shap_values[0, :, 1].feature_names).abs().idxmax()
-    st.info(f"**Business Insight:** The most influential factor in this decision was **{top_feature}**.")
 
+    try:
+        fig = plt.figure(figsize=(10, 4))
 
+        if len(shap_values.shape) == 3:
+            shap.plots.waterfall(shap_values[0, :, 1], show=False)
+            top_values = shap_values[0, :, 1].values
+            top_names = shap_values[0, :, 1].feature_names
+        else:
+            shap.plots.waterfall(shap_values[0], show=False)
+            top_values = shap_values[0].values
+            top_names = shap_values[0].feature_names
+
+        st.pyplot(fig)
+
+        top_feature = pd.Series(np.abs(top_values), index=top_names).idxmax()
+        st.info(f"Business Insight: The most influential factor in this decision was **{top_feature}**.")
+    except Exception as e:
+        st.info(f"SHAP values were calculated, but the waterfall chart could not be displayed. Error: {e}")
+
+# ------------------------------------------------------------
 # Streamlit UI
-st.set_page_config(page_title="ML Deployment", layout="wide")
-st.title("👨‍💻 ML Deployment")
-
+# ------------------------------------------------------------
 with st.form("pred_form"):
-    st.subheader(f"Inputs")
+    st.subheader("Inputs")
     cols = st.columns(2)
     user_inputs = {}
-   
+
     for i, inp in enumerate(MODEL_INFO["inputs"]):
         with cols[i % 2]:
-            user_inputs[inp['name']] = st.number_input(
-                inp['name'].replace('_', ' ').upper(),
-                min_value=inp['min'], max_value=inp['max'], value=inp['default'], step=inp['step']
+            user_inputs[inp["name"]] = st.number_input(
+                inp["name"].replace("_", " ").upper(),
+                min_value=inp["min"],
+                max_value=inp["max"],
+                value=inp["default"],
+                step=inp["step"],
             )
-   
+
     submitted = st.form_submit_button("Run Prediction")
 
-original = dataset.iloc[0:1].to_dict()
-original.update(user_inputs)
 if submitted:
+    original = build_input_dataframe(dataset, user_inputs)
 
     res, status = call_model_api(original)
     if status == 200:
         st.metric("Prediction Result", res)
-        display_explanation(original,session, aws_bucket)
+        display_explanation(original)
     else:
         st.error(res)
