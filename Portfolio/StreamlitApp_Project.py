@@ -42,7 +42,7 @@ if project_root not in sys.path:
 file_path = os.path.join(project_root, 'Portfolio/X_train.csv')
 
 dataset = pd.read_csv(file_path)
-dataset = dataset.drop(['Unnamed: 0'],axis=1)
+dataset = dataset.drop(columns=['Unnamed: 0'], errors='ignore')
 #dataset = dataset.loc[:, ~dataset.columns.str.contains('^Unnamed')]
 
 # Access the secrets
