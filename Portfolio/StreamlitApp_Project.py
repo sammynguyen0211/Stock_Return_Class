@@ -21,6 +21,8 @@ warnings.simplefilter("ignore")
 
 # ------------------------------------------------------------
 # Page setup
+
+
 # ------------------------------------------------------------
 st.set_page_config(page_title="ML Deployment", layout="wide")
 st.title("👨‍💻 ML Deployment")
@@ -170,7 +172,6 @@ def clean_dataframe(df):
     df = df.loc[:, ~df.columns.str.match(r"^index$", na=False)]
     return df
 
-
 def call_model_api(input_df):
     predictor = Predictor(
         endpoint_name=MODEL_INFO["endpoint"],
@@ -180,13 +181,18 @@ def call_model_api(input_df):
     )
 
     try:
-        # FIX: strip unnamed/index columns before sending to endpoint
         clean_df = clean_dataframe(input_df)
-        payload = clean_df.to_dict(orient="records")
+
+        # Send JSON string to SageMaker
+        payload = clean_df.to_json(orient="records")
+
         raw_pred = predictor.predict(payload)
+
         pred_val = int(np.array(raw_pred).ravel()[-1])
         mapping = {0: "Legitimate", 1: "Fraud"}
+
         return mapping.get(pred_val, str(pred_val)), 200
+
     except Exception as e:
         return f"Prediction error: {e}", 500
 
