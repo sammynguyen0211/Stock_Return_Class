@@ -173,26 +173,21 @@ def clean_dataframe(df):
     return df
 
 def call_model_api(input_df):
-    predictor = Predictor(
-        endpoint_name=MODEL_INFO["endpoint"],
-        sagemaker_session=sm_session,
-        serializer=JSONSerializer(),
-        deserializer=JSONDeserializer(),
-    )
-
     try:
+        # Load model locally from S3 (you already built this)
+        model = load_pipeline(session, aws_bucket, MODEL_INFO["s3_model_folder"])
+
+        # Clean input
         clean_df = clean_dataframe(input_df)
 
-        # Send JSON string to SageMaker
-        payload = clean_df.to_json(orient="records")
+        # Predict directly
+        pred = model.predict(clean_df)
+        pred_val = int(pred[0])
 
-        raw_pred = predictor.predict(payload)
-
-        pred_val = int(np.array(raw_pred).ravel()[-1])
         mapping = {0: "Legitimate", 1: "Fraud"}
 
         return mapping.get(pred_val, str(pred_val)), 200
-
+        
     except Exception as e:
         return f"Prediction error: {e}", 500
 
