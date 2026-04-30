@@ -38,8 +38,9 @@ file_path = os.path.join(project_root, "Portfolio", "X_train.csv")
 @st.cache_data
 def load_dataset(path):
     df = pd.read_csv(path)
-    df = df.drop(columns=["Unnamed: 0"], errors="ignore")
-    df = df.loc[:, ~df.columns.str.contains("^Unnamed")]
+    # Drop ALL unnamed/index columns aggressively
+    df = df.loc[:, ~df.columns.str.contains("^Unnamed", na=False)]
+    df = df.loc[:, ~df.columns.str.match(r"^index$", na=False)]
     return df
 
 try:
@@ -163,16 +164,25 @@ def build_input_dataframe(base_df, user_inputs):
     return row
 
 
+def clean_dataframe(df):
+    """Remove any unnamed or index columns before sending to endpoint."""
+    df = df.loc[:, ~df.columns.str.contains("^Unnamed", na=False)]
+    df = df.loc[:, ~df.columns.str.match(r"^index$", na=False)]
+    return df
+
+
 def call_model_api(input_df):
     predictor = Predictor(
         endpoint_name=MODEL_INFO["endpoint"],
         sagemaker_session=sm_session,
         serializer=JSONSerializer(),
-        deserializer=JSONDeserializer(),  # FIX: matches output_fn returning application/json
+        deserializer=JSONDeserializer(),
     )
 
     try:
-        payload = input_df.to_dict(orient="records")  # FIX: pd.read_json in inference_project.py needs named columns
+        # FIX: strip unnamed/index columns before sending to endpoint
+        clean_df = clean_dataframe(input_df)
+        payload = clean_df.to_dict(orient="records")
         raw_pred = predictor.predict(payload)
         pred_val = int(np.array(raw_pred).ravel()[-1])
         mapping = {0: "Legitimate", 1: "Fraud"}
