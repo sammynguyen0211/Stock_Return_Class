@@ -213,4 +213,3 @@ class PairFeatureEngineer(BaseEstimator, TransformerMixin):
         rolling_mean = spread_series.rolling(self.window).mean()
         rolling_std = spread_series.rolling(self.window).std()
         return (spread_series - rolling_mean) / rolling_std
-
