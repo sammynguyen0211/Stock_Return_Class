@@ -171,8 +171,11 @@ def call_model_api(input_df):
         deserializer=NumpyDeserializer(),
     )
 
+    # FIX: Send as 2D list instead of list of dicts
+    # This matches the format most sklearn SageMaker endpoints expect
     try:
-        raw_pred = predictor.predict(input_df.to_dict(orient="records"))
+        payload = input_df.values.tolist()
+        raw_pred = predictor.predict(payload)
         pred_val = int(np.array(raw_pred).ravel()[-1])
         mapping = {0: "Legitimate", 1: "Fraud"}
         return mapping.get(pred_val, str(pred_val)), 200
