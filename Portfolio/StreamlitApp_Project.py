@@ -274,8 +274,16 @@ if submitted:
 
     res, status = call_model_api(original)
 
+
     if status == 200:
         st.metric("Prediction Result", res)
         st.success("Model prediction completed successfully.")
+    
+        # Optional SHAP (won’t break app)
+        try:
+            display_explanation(original)
+        except:
+            pass
+    
     else:
         st.error(res)
