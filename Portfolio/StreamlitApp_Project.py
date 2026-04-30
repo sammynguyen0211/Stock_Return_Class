@@ -165,13 +165,14 @@ def build_input_dataframe(base_df, user_inputs):
 
     return row
 
-
 def clean_dataframe(df):
-    """Remove any unnamed or index columns before sending to endpoint."""
-    df = df.loc[:, ~df.columns.str.contains("^Unnamed", na=False)]
-    df = df.loc[:, ~df.columns.str.match(r"^index$", na=False)]
-    return df
+    """Keep columns the model expects."""
+    df = df.copy()
 
+    if "Unnamed: 0_x" not in df.columns:
+        df["Unnamed: 0_x"] = 0
+
+    return df
 def call_model_api(input_df):
     try:
         # Load model locally from S3 (you already built this)
