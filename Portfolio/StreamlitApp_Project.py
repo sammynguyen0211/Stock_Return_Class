@@ -13,7 +13,7 @@ import pandas as pd
 import sagemaker
 import shap
 import streamlit as st
-from sagemaker.deserializers import NumpyDeserializer
+from sagemaker.deserializers import JSONDeserializer
 from sagemaker.predictor import Predictor
 from sagemaker.serializers import JSONSerializer
 
@@ -168,13 +168,11 @@ def call_model_api(input_df):
         endpoint_name=MODEL_INFO["endpoint"],
         sagemaker_session=sm_session,
         serializer=JSONSerializer(),
-        deserializer=NumpyDeserializer(),
+        deserializer=JSONDeserializer(),  # FIX: matches output_fn returning application/json
     )
 
-    # FIX: Send as 2D list instead of list of dicts
-    # This matches the format most sklearn SageMaker endpoints expect
     try:
-        payload = input_df.values.tolist()
+        payload = input_df.to_dict(orient="records")  # FIX: pd.read_json in inference_project.py needs named columns
         raw_pred = predictor.predict(payload)
         pred_val = int(np.array(raw_pred).ravel()[-1])
         mapping = {0: "Legitimate", 1: "Fraud"}
