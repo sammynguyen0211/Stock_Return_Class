@@ -200,32 +200,37 @@ def get_preprocessor_and_model(best_pipeline):
         return preprocessor, model
     return None, best_pipeline
 
-
 def display_explanation(input_df):
     explainer_key = posixpath.join("explainer", MODEL_INFO["explainer"])
     explainer = load_shap_explainer(session, aws_bucket, explainer_key)
 
     if explainer is None:
-        st.info("Prediction worked, but SHAP explanation was skipped because the explainer could not be loaded.")
+        st.info("SHAP explainer could not be loaded.")
         return
 
     best_pipeline = load_pipeline(session, aws_bucket, MODEL_INFO["s3_model_folder"])
     preprocessor, _ = get_preprocessor_and_model(best_pipeline)
 
     try:
+        # IMPORTANT: use cleaned input so Unnamed: 0_x exists
+        input_df = clean_dataframe(input_df)
+
         if preprocessor is not None:
             transformed = preprocessor.transform(input_df)
+
             try:
                 feature_names = preprocessor.get_feature_names_out()
             except Exception:
                 feature_names = [f"feature_{i}" for i in range(transformed.shape[1])]
+
             explain_df = pd.DataFrame(transformed, columns=feature_names)
         else:
             explain_df = input_df.copy()
 
         shap_values = explainer(explain_df)
+
     except Exception as e:
-        st.info(f"Prediction worked, but SHAP explanation could not be created. Error: {e}")
+        st.info(f"SHAP explanation could not be created. Error: {e}")
         return
 
     st.subheader("🔍 Decision Transparency (SHAP)")
@@ -235,19 +240,13 @@ def display_explanation(input_df):
 
         if len(shap_values.shape) == 3:
             shap.plots.waterfall(shap_values[0, :, 1], show=False)
-            top_values = shap_values[0, :, 1].values
-            top_names = shap_values[0, :, 1].feature_names
         else:
             shap.plots.waterfall(shap_values[0], show=False)
-            top_values = shap_values[0].values
-            top_names = shap_values[0].feature_names
 
         st.pyplot(fig)
 
-        top_feature = pd.Series(np.abs(top_values), index=top_names).idxmax()
-        st.info(f"Business Insight: The most influential factor in this decision was **{top_feature}**.")
     except Exception as e:
-        st.info(f"SHAP values were calculated, but the waterfall chart could not be displayed. Error: {e}")
+        st.info(f"SHAP plot could not be displayed. Error: {e}")
 
 # ------------------------------------------------------------
 # Streamlit UI
