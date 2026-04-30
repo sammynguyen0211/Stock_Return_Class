@@ -273,8 +273,9 @@ if submitted:
     original = build_input_dataframe(dataset, user_inputs)
 
     res, status = call_model_api(original)
+
     if status == 200:
         st.metric("Prediction Result", res)
-        display_explanation(original)
+        st.success("Model prediction completed successfully.")
     else:
         st.error(res)
