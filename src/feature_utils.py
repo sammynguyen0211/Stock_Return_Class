@@ -98,3 +98,4 @@ def get_emp_num(col):
 def get_term_num(col):
     return pd.to_numeric(col.iloc[:, 0].str.replace(' months', '', regex=False), errors='coerce').to_frame()
 
+
